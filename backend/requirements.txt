@@ -1,0 +1,17 @@
+# Backend Python Dependencies
+# Smart Air Pollution Monitoring Portal
+#
+# Install with:  pip install -r requirements.txt
+# NOTE: This file is written at Step 1 but packages are installed in Step 2.
+#
+# Only libraries actually needed for the backend are listed here.
+# No unused dependencies are included.
+
+Flask==3.1.0            # Web framework for REST API
+requests==2.32.3        # HTTP client for OpenAQ API calls
+python-dotenv==1.0.1    # Load API key from .env file safely
+
+# --- Future steps (uncomment when needed) ---
+# pandas==2.2.0         # Data processing for historical CSVs (ML step)
+# scikit-learn==1.5.0   # Machine learning models (ML step)
+# statsmodels==0.14.2   # ARIMA forecasting (ML step)
