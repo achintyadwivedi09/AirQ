@@ -10,7 +10,7 @@ from config import CITIES, POLLUTANTS
 from aqi_calculator import calculate_aqi
 
 HISTORICAL_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..', 'data', 'historical')
+    os.path.join(os.path.dirname(__file__), 'data', 'historical')
 )
 
 
