@@ -26,22 +26,35 @@ def get_cached(namespace, params, ttl):
     params: dict of query params
     ttl: max age in seconds
     """
+    data, is_stale = get_cached_with_stale(namespace, params, ttl)
+    if not is_stale:
+        return data
+    return None
+
+def get_cached_with_stale(namespace, params, ttl):
+    """
+    Returns (data, is_stale).
+    If file doesn't exist, returns (None, True).
+    If exists but older than ttl, returns (data, True).
+    If fresh, returns (data, False).
+    """
     _ensure_cache_dir()
     key = _cache_key(namespace, params)
     filepath = os.path.join(CACHE_DIR, f"{namespace}_{key}.json")
 
     if not os.path.exists(filepath):
-        return None
+        return None, True
 
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             cached = json.load(f)
-        if time.time() - cached.get('_cached_at', 0) < ttl:
-            return cached.get('data')
+        
+        is_stale = time.time() - cached.get('_cached_at', 0) > ttl
+        return cached.get('data'), is_stale
     except (json.JSONDecodeError, IOError):
         pass
 
-    return None
+    return None, True
 
 
 def set_cached(namespace, params, data):

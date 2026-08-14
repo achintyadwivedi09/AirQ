@@ -10,8 +10,23 @@ from config import (
     OPENAQ_API_KEY, OPENAQ_BASE_URL, OPENAQ_TIMEOUT,
     CITIES, POLLUTANTS, CACHE_TTL_READINGS, CACHE_TTL_STATIONS,
 )
-from cache import get_cached, set_cached
+from cache import get_cached, set_cached, get_cached_with_stale, _cache_key
 from aqi_calculator import calculate_aqi, get_aqi_category
+import threading
+
+_bg_locks = set()
+
+def _bg_fetch(func, cache_key, *args, **kwargs):
+    if cache_key in _bg_locks:
+        return
+    _bg_locks.add(cache_key)
+    try:
+        func(*args, **kwargs)
+    finally:
+        try:
+            _bg_locks.remove(cache_key)
+        except KeyError:
+            pass
 
 
 def _headers():
@@ -51,9 +66,12 @@ def discover_stations_for_city(city_id, force_refresh=False):
 
     cache_params = {'city': city_id, 'type': 'stations'}
     if not force_refresh:
-        cached = get_cached('stations', cache_params, CACHE_TTL_STATIONS)
-        if cached is not None:
-            return cached
+        data, is_stale = get_cached_with_stale('stations', cache_params, CACHE_TTL_STATIONS)
+        if data is not None:
+            if is_stale:
+                key = _cache_key('stations', cache_params)
+                threading.Thread(target=_bg_fetch, args=(discover_stations_for_city, key, city_id, True)).start()
+            return data
 
     # Bounding box: ~50km around city centre
     delta = 0.5  # roughly 55km
@@ -148,9 +166,12 @@ def get_latest_reading(city_id, station_id=None, force_refresh=False):
     """
     cache_params = {'city': city_id, 'station': station_id, 'type': 'latest'}
     if not force_refresh:
-        cached = get_cached('latest', cache_params, CACHE_TTL_READINGS)
-        if cached is not None:
-            return cached
+        data, is_stale = get_cached_with_stale('latest', cache_params, CACHE_TTL_READINGS)
+        if data is not None:
+            if is_stale:
+                key = _cache_key('latest', cache_params)
+                threading.Thread(target=_bg_fetch, args=(get_latest_reading, key, city_id, station_id, True)).start()
+            return data
 
     if station_id:
         reading = _fetch_station_latest(city_id, station_id)
@@ -257,15 +278,19 @@ def _normalize_param(measurement):
 # Historical data
 # ──────────────────────────────────────────────
 
-def get_historical_readings(city_id, station_id=None, days=7, pollutant='pm25'):
+def get_historical_readings(city_id, station_id=None, days=7, pollutant='pm25', force_refresh=False):
     """
     Get historical readings for charting.
     Returns list of {timestamp, value} dicts.
     """
     cache_params = {'city': city_id, 'station': station_id, 'days': days, 'pollutant': pollutant}
-    cached = get_cached('history', cache_params, CACHE_TTL_READINGS)
-    if cached is not None:
-        return cached
+    if not force_refresh:
+        data, is_stale = get_cached_with_stale('history', cache_params, CACHE_TTL_READINGS)
+        if data is not None:
+            if is_stale:
+                key = _cache_key('history', cache_params)
+                threading.Thread(target=_bg_fetch, args=(get_historical_readings, key, city_id, station_id, days, pollutant, True)).start()
+            return data
 
     openaq_pollutant = POLLUTANTS.get(pollutant, {}).get('openaq_name', pollutant)
     sensor_id = None
@@ -332,14 +357,18 @@ def get_historical_readings(city_id, station_id=None, days=7, pollutant='pm25'):
     return readings
 
 
-def get_summary_stats(city_id, days=7):
+def get_summary_stats(city_id, days=7, force_refresh=False):
     """
     Compute min, max, avg for each pollutant over the given period.
     """
     cache_params = {'city': city_id, 'days': days, 'type': 'summary'}
-    cached = get_cached('summary', cache_params, CACHE_TTL_READINGS)
-    if cached is not None:
-        return cached
+    if not force_refresh:
+        data, is_stale = get_cached_with_stale('summary', cache_params, CACHE_TTL_READINGS)
+        if data is not None:
+            if is_stale:
+                key = _cache_key('summary', cache_params)
+                threading.Thread(target=_bg_fetch, args=(get_summary_stats, key, city_id, days, True)).start()
+            return data
 
     summary = {}
     for poll_key, poll_info in POLLUTANTS.items():
