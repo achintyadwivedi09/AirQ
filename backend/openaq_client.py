@@ -61,7 +61,7 @@ def discover_stations_for_city(city_id, force_refresh=False):
 
     all_locations = []
     page = 1
-    max_pages = 5
+    max_pages = 1
 
     while page <= max_pages:
         data = _get('/locations', params={
@@ -93,6 +93,13 @@ def discover_stations_for_city(city_id, force_refresh=False):
                          abs(lon - city['lon']) < 0.3)
 
             if search_match or geo_match:
+                sensor_mapping = {}
+                for p in (loc.get('sensors') or []):
+                    param_obj = p.get('parameter', {})
+                    p_name = param_obj.get('name', '') if isinstance(param_obj, dict) else ''
+                    if p_name and 'id' in p:
+                        sensor_mapping[p_name.lower()] = p['id']
+
                 station = {
                     'station_id': str(loc.get('id', '')),
                     'name': loc.get('name', 'Unknown Station'),
@@ -102,8 +109,8 @@ def discover_stations_for_city(city_id, force_refresh=False):
                     'lon': lon,
                     'provider': _extract_provider(loc),
                     'is_active': loc.get('isMonitor', True),
-                    'parameters': [p.get('parameter', p.get('name', '')) if isinstance(p, dict) else str(p)
-                                   for p in (loc.get('sensors') or loc.get('parameters') or [])],
+                    'parameters': list(sensor_mapping.keys()),
+                    'sensor_mapping': sensor_mapping,
                 }
                 all_locations.append(station)
 
@@ -260,28 +267,43 @@ def get_historical_readings(city_id, station_id=None, days=7, pollutant='pm25'):
     if cached is not None:
         return cached
 
-    # Find a station
-    if not station_id:
-        stations = discover_stations_for_city(city_id)
-        if stations:
-            station_id = stations[0]['station_id']
-        else:
-            return []
+    openaq_pollutant = POLLUTANTS.get(pollutant, {}).get('openaq_name', pollutant)
+    sensor_id = None
+
+    # Find a station that has the requested pollutant
+    stations = discover_stations_for_city(city_id)
+    if not stations:
+        return []
+
+    if station_id:
+        # User requested a specific station, check if it has the pollutant
+        for st in stations:
+            if st['station_id'] == station_id:
+                sensor_id = st.get('sensor_mapping', {}).get(openaq_pollutant)
+                break
+    else:
+        # Find first station with this pollutant
+        for st in stations:
+            sensor_id = st.get('sensor_mapping', {}).get(openaq_pollutant)
+            if sensor_id:
+                station_id = st['station_id']
+                break
+
+    if not sensor_id:
+        return []
 
     # Date range
     now = datetime.now(timezone.utc)
     date_from = (now - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%SZ')
     date_to = now.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-    # Fetch measurements
+    # Fetch measurements from sensor endpoint
     readings = []
     page = 1
     max_pages = 3
 
     while page <= max_pages:
-        data = _get('/measurements', params={
-            'locations_id': station_id,
-            'parameter': POLLUTANTS.get(pollutant, {}).get('openaq_name', pollutant),
+        data = _get(f'/sensors/{sensor_id}/measurements', params={
             'date_from': date_from,
             'date_to': date_to,
             'limit': 100,
@@ -294,7 +316,9 @@ def get_historical_readings(city_id, station_id=None, days=7, pollutant='pm25'):
 
         results = data.get('results', [])
         for m in results:
-            ts = m.get('date', {}).get('utc') or m.get('datetime', {}).get('utc', '')
+            ts = m.get('period', {}).get('datetimeTo', {}).get('utc', '')
+            if not ts:
+                ts = m.get('date', {}).get('utc') or m.get('datetime', {}).get('utc', '')
             readings.append({
                 'timestamp': ts,
                 'value': m.get('value'),

@@ -246,8 +246,26 @@ def api_summary():
         return _error('Parameter "days" must be an integer')
 
     summary = get_summary_stats(city_id, days=days)
+    
+    # If summary is empty due to API failure, compute from fallback history
+    if not summary.get('pm25', {}).get('count'):
+        for poll_key, poll_info in POLLUTANTS.items():
+            f_history = get_fallback_history(city_id, pollutant=poll_key, days=days)
+            values = [r['value'] for r in f_history if r.get('value') is not None]
+            if values:
+                summary[poll_key] = {
+                    'min': round(min(values), 1),
+                    'max': round(max(values), 1),
+                    'avg': round(sum(values) / len(values), 1),
+                    'count': len(values),
+                    'unit': poll_info['unit'],
+                }
+    
     reading = get_latest_reading(city_id) or get_fallback_reading(city_id) or iot_manager.generate_reading(city_id=city_id)
+    
     history = get_historical_readings(city_id, days=1, pollutant='pm25') # for trend
+    if not history:
+        history = get_fallback_history(city_id, pollutant='pm25', days=1)
     
     # Active alerts
     alerts = check_alerts(reading) if reading else []
