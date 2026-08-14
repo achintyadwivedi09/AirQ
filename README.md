@@ -2,7 +2,7 @@
 
 > **College Assessment Project** — Concepts: IoT and Dashboards  
 > Individual Vibe Coding Assessment  
-> Current Phase: **Step 1 — Foundation & Architecture**
+> Current Phase: **DONE**
 
 ---
 
